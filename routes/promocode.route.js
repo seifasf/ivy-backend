@@ -11,6 +11,7 @@ const {
 const validate = require("../middleware/validate");
 const verfiyToken = require("../middleware/verfiytoken");
 const isAdmin = require("../middleware/isAdmin");
+const { publicWriteLimiter } = require("../middleware/rateLimits");
 
 // Admin: Create Promo Code (protected)
 router.post(
@@ -31,6 +32,7 @@ router.get("/:id", verfiyToken, isAdmin, idValidation, validate, promoCodeContro
 // Public: Validate Promo Code (for checkout)
 router.post(
   "/validate",
+  publicWriteLimiter,
   validatePromoCodeValidation,
   validate,
   promoCodeController.validatePromoCode

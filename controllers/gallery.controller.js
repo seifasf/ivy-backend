@@ -1,7 +1,6 @@
 const Gallery = require("../model/gallery.model");
 const asyncWrapper = require("../middleware/asyncwrapper");
-const fs = require("fs");
-const path = require("path");
+const { deleteImage } = require("../utils/images");
 
 // Create Gallery
 const createGallery = asyncWrapper(async (req, res) => {
@@ -21,7 +20,8 @@ const createGallery = asyncWrapper(async (req, res) => {
 
 // Get All Galleries
 const getAllGalleries = asyncWrapper(async (req, res) => {
-  const galleries = await Gallery.find({}, { __v: false });
+  const galleries = await Gallery.find({}, { __v: false }).lean();
+  res.set("Cache-Control", "public, no-cache");
   res.json(galleries);
 });
 
@@ -43,7 +43,7 @@ const updateGallery = asyncWrapper(async (req, res) => {
   if (req.file) {
     // Remove old image from disk
     try {
-      fs.unlinkSync(path.join('uploads', gallery.image));
+      deleteImage(gallery.image);
     } catch (e) {}
     gallery.image = req.file.filename;
   }
@@ -61,7 +61,7 @@ const deleteGallery = asyncWrapper(async (req, res) => {
 
   // Remove image from disk
   try {
-    fs.unlinkSync(path.join('uploads', gallery.image));
+    deleteImage(gallery.image);
   } catch (e) {}
 
   await gallery.deleteOne();

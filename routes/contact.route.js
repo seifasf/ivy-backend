@@ -9,10 +9,12 @@ const {
   idValidation
 } = require("../middleware/contact.validation");
 const validate = require("../middleware/validate");
+const { publicWriteLimiter } = require("../middleware/rateLimits");
 
 // Create Contact (public)
 router.post(
   "/",
+  publicWriteLimiter,
   createContactValidation,
   validate,
   contactController.createContact

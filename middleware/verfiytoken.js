@@ -1,19 +1,35 @@
 const jwt = require('jsonwebtoken');
-const verfiyToken = (req,res,next) => {
-    const authHeader = req.headers["Authorization"] || req.headers["authorization"]
-    if (!authHeader) {
-        return res.status(401).json("Unauthorized access")
+
+const readToken = (req) => {
+    const authHeader = req.headers.authorization || '';
+    const [scheme, token] = authHeader.split(' ');
+    return scheme === 'Bearer' && token ? token : null;
+};
+
+const verfiyToken = (req, res, next) => {
+    const token = readToken(req);
+    if (!token) {
+        return res.status(401).json({ message: "Unauthorized access" });
     }
-    const token = authHeader.split(' ')[1];
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY)
-        req.decoded = decoded
-        next()
+        req.decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+        next();
     } catch (err) {
-        res.status(500).json("invalid token")
+        res.status(401).json({ message: "Invalid or expired token" });
     }
+};
 
-
-}
+// Sets req.decoded when a valid token is sent, but never blocks the request.
+verfiyToken.optional = (req, res, next) => {
+    const token = readToken(req);
+    if (token) {
+        try {
+            req.decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+        } catch (err) {
+            req.decoded = undefined;
+        }
+    }
+    next();
+};
 
 module.exports = verfiyToken;

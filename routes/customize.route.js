@@ -10,10 +10,12 @@ const {
   idValidation
 } = require("../middleware/customize.validation");
 const validate = require("../middleware/validate");
+const { publicWriteLimiter } = require("../middleware/rateLimits");
 
 // Create Customize (public)
 router.post(
   "/",
+  publicWriteLimiter,
   upload.array("image", 5),
   createCustomizeValidation,
   validate,

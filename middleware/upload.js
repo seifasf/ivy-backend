@@ -1,30 +1,30 @@
 const multer = require('multer');
 const path = require('path');
+const { persistUploads } = require('../utils/images');
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
+const ALLOWED_EXT = /^\.(jpe?g|png|webp)$/;
+const ALLOWED_MIME = /^image\/(jpeg|png|webp)$/;
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|webp/;
   const ext = path.extname(file.originalname).toLowerCase();
-  if (allowedTypes.test(ext)) {
+  if (ALLOWED_EXT.test(ext) && ALLOWED_MIME.test(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Only images are allowed (jpeg, jpg, png, webp)!'), false);
+    const err = new Error('Only images are allowed (jpeg, jpg, png, webp)!');
+    err.status = 400;
+    cb(err, false);
   }
 };
 
-const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB max per image
+const multerUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024, files: 11 }
 });
 
-module.exports = upload;
+// Each method returns [multer, persistUploads] so routes can use it exactly like multer.
+module.exports = {
+  single: (field) => [multerUpload.single(field), persistUploads],
+  array: (field, maxCount) => [multerUpload.array(field, maxCount), persistUploads],
+  fields: (fields) => [multerUpload.fields(fields), persistUploads],
+};

@@ -1,7 +1,9 @@
 const Product = require("../model/product.model");
 const asyncWrapper = require("../middleware/asyncwrapper");
-const fs = require("fs");
-const path = require("path");
+const { deleteImage } = require("../utils/images");
+const { remember, invalidate } = require("../utils/memoryCache");
+
+const PRODUCTS_TTL_MS = 60 * 1000;
 
 // Create Product
 const createProduct = asyncWrapper(async (req, res) => {
@@ -37,19 +39,24 @@ const createProduct = asyncWrapper(async (req, res) => {
   });
 
   await product.save();
+  invalidate("products:");
   res.status(201).json(product);
 });
 
 // Get All Products
 const getAllProducts = asyncWrapper(async (req, res) => {
-  const products = await Product.find({}, { __v: false });
+  const products = await remember("products:all", PRODUCTS_TTL_MS, () =>
+    Product.find({}, { __v: false }).sort({ createdAt: -1 }).lean()
+  );
+  res.set("Cache-Control", "public, no-cache");
   res.json(products);
 });
 
 // Get Product By ID
 const getProductById = asyncWrapper(async (req, res) => {
-  const product = await Product.findById(req.params.id, { __v: false });
+  const product = await Product.findById(req.params.id, { __v: false }).lean();
   if (!product) return res.status(404).json({ message: "Product not found" });
+  res.set("Cache-Control", "public, no-cache");
   res.json(product);
 });
 
@@ -73,9 +80,7 @@ const updateProduct = asyncWrapper(async (req, res) => {
   // Handle mainImage update
   if (req.files && req.files.mainImage && req.files.mainImage.length > 0) {
     // Remove old main image
-    try {
-      fs.unlinkSync(path.join('uploads', product.mainImage));
-    } catch (e) {}
+    deleteImage(product.mainImage);
     product.mainImage = req.files.mainImage[0].filename;
   }
 
@@ -100,9 +105,7 @@ const updateProduct = asyncWrapper(async (req, res) => {
   // Remove deleted images from disk
   product.images.forEach(img => {
     if (!oldImagesArr.includes(img)) {
-      try {
-        fs.unlinkSync(path.join('uploads', img));
-      } catch (e) {}
+      deleteImage(img);
     }
   });
 
@@ -126,6 +129,7 @@ const updateProduct = asyncWrapper(async (req, res) => {
   }
 
   await product.save();
+  invalidate("products:");
   res.json(product);
 });
 
@@ -135,14 +139,11 @@ const deleteProduct = asyncWrapper(async (req, res) => {
   if (!product) return res.status(404).json({ message: "Product not found" });
 
   // Remove images from disk
-  try {
-    fs.unlinkSync(path.join('uploads', product.mainImage));
-    product.images.forEach(img => {
-      fs.unlinkSync(path.join('uploads', img));
-    });
-  } catch (e) {}
+  deleteImage(product.mainImage);
+  product.images.forEach(img => deleteImage(img));
 
   await product.deleteOne();
+  invalidate("products:");
   res.json({ message: "Product deleted" });
 });
 

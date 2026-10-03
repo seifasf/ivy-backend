@@ -9,10 +9,12 @@ const {
   idValidation
 } = require("../middleware/business.validation");
 const validate = require("../middleware/validate");
+const { publicWriteLimiter } = require("../middleware/rateLimits");
 
 // Create Business (public)
 router.post(
   "/",
+  publicWriteLimiter,
   createBusinessValidation,
   validate,
   businessController.createBusiness

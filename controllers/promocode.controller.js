@@ -1,5 +1,6 @@
 const PromoCode = require("../model/promocode.model");
 const asyncWrapper = require("../middleware/asyncwrapper");
+const { promoDiscount, promoProblem } = require("../utils/pricing");
 
 // Create Promo Code
 const createPromoCode = asyncWrapper(async (req, res) => {
@@ -24,7 +25,7 @@ const createPromoCode = asyncWrapper(async (req, res) => {
 
 // Get All Promo Codes
 const getAllPromoCodes = asyncWrapper(async (req, res) => {
-  const promoCodes = await PromoCode.find({}, { __v: false }).sort({ createdAt: -1 });
+  const promoCodes = await PromoCode.find({}, { __v: false }).sort({ createdAt: -1 }).lean();
   res.json(promoCodes);
 });
 
@@ -37,59 +38,28 @@ const getPromoCodeById = asyncWrapper(async (req, res) => {
 
 // Validate Promo Code (public endpoint for checkout)
 const validatePromoCode = asyncWrapper(async (req, res) => {
-  const { code, orderTotal } = req.body;
-  
-  const promoCode = await PromoCode.findOne({ code: code.toUpperCase() });
-  
-  if (!promoCode) {
-    return res.status(404).json({ valid: false, message: "Promo code not found" });
+  const { code } = req.body;
+  const orderTotal = Number(req.body.orderTotal) || 0;
+
+  const promoCode = await PromoCode.findOne({ code: code.trim().toUpperCase() }).lean();
+  const problem = promoProblem(promoCode, orderTotal);
+  if (problem) {
+    return res.status(promoCode ? 400 : 404).json({ valid: false, message: problem });
   }
 
-  if (!promoCode.active) {
-    return res.status(400).json({ valid: false, message: "Promo code is inactive" });
-  }
-
-  if (new Date(promoCode.expiryDate) < new Date()) {
-    return res.status(400).json({ valid: false, message: "Promo code has expired" });
-  }
-
-  if (promoCode.currentUsage >= promoCode.maxUsage) {
-    return res.status(400).json({ valid: false, message: "Promo code usage limit reached" });
-  }
-
-  if (orderTotal < promoCode.minOrderValue) {
-    return res.status(400).json({ 
-      valid: false, 
-      message: `Minimum order value of ${promoCode.minOrderValue} EGP required` 
-    });
-  }
-
-  let discountAmount = 0;
-  if (promoCode.discountType === 'percentage') {
-    discountAmount = (orderTotal * promoCode.discountValue) / 100;
-  } else {
-    discountAmount = promoCode.discountValue;
-  }
-
-  res.json({ 
-    valid: true, 
-    discountAmount,
+  const discount = promoDiscount(promoCode, orderTotal);
+  res.json({
+    valid: true,
+    discount,
+    discountAmount: discount,
     discountType: promoCode.discountType,
     discountValue: promoCode.discountValue
   });
 });
 
-// Apply Promo Code (increment usage)
+// Usage is now counted when the order is placed; kept so older clients don't error
 const applyPromoCode = asyncWrapper(async (req, res) => {
-  const { code } = req.body;
-  
-  const promoCode = await PromoCode.findOne({ code: code.toUpperCase() });
-  if (!promoCode) return res.status(404).json({ message: "Promo code not found" });
-
-  promoCode.currentUsage += 1;
-  await promoCode.save();
-  
-  res.json({ message: "Promo code applied successfully", promoCode });
+  res.json({ message: "Promo code usage is recorded with the order" });
 });
 
 // Update Promo Code

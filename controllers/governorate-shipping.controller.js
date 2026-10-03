@@ -1,5 +1,8 @@
 const GovernorateShipping = require("../model/governorate-shipping.model");
 const asyncWrapper = require("../middleware/asyncwrapper");
+const { escapeRegex } = require("../utils/pricing");
+
+const FEES_CACHE = "public, max-age=300, stale-while-revalidate=3600";
 
 // Initialize default governorates (call this once to set up)
 const initializeGovernoratesFees = asyncWrapper(async (req, res) => {
@@ -44,7 +47,8 @@ const initializeGovernoratesFees = asyncWrapper(async (req, res) => {
 
 // Get All Governorate Fees
 const getAllGovernoratesFees = asyncWrapper(async (req, res) => {
-  const fees = await GovernorateShipping.find().sort({ governorate: 1 });
+  const fees = await GovernorateShipping.find({}, { __v: 0 }).sort({ governorate: 1 }).lean();
+  res.set("Cache-Control", FEES_CACHE);
   res.json(fees);
 });
 
@@ -55,13 +59,14 @@ const getGovernoratesFee = asyncWrapper(async (req, res) => {
   governorate = decodeURIComponent(governorate).trim();
   
   // Try exact match first
-  let fee = await GovernorateShipping.findOne({ governorate });
-  
+  let fee = await GovernorateShipping.findOne({ governorate }, { __v: 0 }).lean();
+
   // If not found, try case-insensitive match
   if (!fee) {
-    fee = await GovernorateShipping.findOne({ 
-      governorate: { $regex: new RegExp(`^${governorate}$`, 'i') } 
-    });
+    fee = await GovernorateShipping.findOne(
+      { governorate: { $regex: new RegExp(`^${escapeRegex(governorate)}$`, 'i') } },
+      { __v: 0 }
+    ).lean();
   }
   
   if (!fee) {
@@ -71,6 +76,7 @@ const getGovernoratesFee = asyncWrapper(async (req, res) => {
     });
   }
   
+  res.set("Cache-Control", FEES_CACHE);
   res.json(fee);
 });
 

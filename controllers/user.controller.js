@@ -2,24 +2,8 @@ const User = require("../model/user.model");
 const asyncWrapper = require("../middleware/asyncwrapper");
 const bcrypt = require("bcrypt");
 const genrateToken = require("../utils/genrateToken");
-const nodemailer = require("nodemailer");
+const { sendEmail } = require("../utils/mailer");
 
-// Helper: send email
-const sendEmail = async (to, subject, text) => {
-  const transporter = nodemailer.createTransporter({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-  await transporter.sendMail({
-    from: process.env.EMAIL_USER,
-    to,
-    subject,
-    text,
-  });
-};
 
 // Sign Up
 const signup = asyncWrapper(async (req, res) => {
@@ -133,13 +117,32 @@ const deleteUser = asyncWrapper(async (req, res) => {
   res.json({ message: "User deleted" });
 });
 
+// Verifies the Google ID token with Google so the client cannot claim someone else's email
+const verifyGoogleCredential = async (credential) => {
+  const response = await fetch(
+    `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
+  );
+  if (!response.ok) return null;
+  const payload = await response.json();
+  const expectedAudience = process.env.GOOGLE_CLIENT_ID;
+  if (expectedAudience && payload.aud !== expectedAudience) return null;
+  if (payload.email_verified !== true && payload.email_verified !== "true") return null;
+  return payload;
+};
+
 // Google OAuth - Create or Login
 const googleAuth = asyncWrapper(async (req, res) => {
-  const { googleId, email, name, picture } = req.body;
-  
-  if (!googleId || !email || !name) {
-    return res.status(400).json({ message: "Missing required Google OAuth data" });
+  const { credential } = req.body;
+  if (!credential || typeof credential !== "string") {
+    return res.status(400).json({ message: "Missing Google credential" });
   }
+
+  const payload = await verifyGoogleCredential(credential);
+  if (!payload) {
+    return res.status(401).json({ message: "Google sign-in could not be verified" });
+  }
+
+  const { sub: googleId, email, name, picture } = payload;
 
   // Check if user exists by email or googleId
   let user = await User.findOne({ 
@@ -183,9 +186,10 @@ const getUserOrders = asyncWrapper(async (req, res) => {
   const userId = req.decoded.id;
   const Checkout = require("../model/checkout.model");
   
-  const orders = await Checkout.find({ userId })
+  const orders = await Checkout.find({ userId }, { __v: 0 })
     .sort({ createdAt: -1 })
-    .populate('items.productId', 'title mainImage');
+    .populate('items.productId', 'title mainImage')
+    .lean();
   
   res.json(orders);
 });

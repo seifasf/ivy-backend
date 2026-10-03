@@ -38,4 +38,9 @@ const checkoutSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+checkoutSchema.index({ createdAt: -1 });
+checkoutSchema.index({ status: 1, createdAt: -1 });
+checkoutSchema.index({ userId: 1, createdAt: -1 });
+checkoutSchema.index({ "userInfo.email": 1, createdAt: -1 });
+
 module.exports = mongoose.model("Checkout", checkoutSchema);

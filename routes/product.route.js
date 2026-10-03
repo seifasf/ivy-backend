@@ -11,6 +11,9 @@ const {
 } = require("../middleware/product.validation");
 const validate = require("../middleware/validate");
 const isAdmin = require("../middleware/isAdmin");
+const asyncWrapper = require("../middleware/asyncwrapper");
+const { deleteImage } = require("../utils/images");
+const { invalidate } = require("../utils/memoryCache");
 
 // Create Product (protected)
 router.post(
@@ -56,14 +59,17 @@ router.post(
   verfiyToken,
   isAdmin,
   upload.single("image"),
-  async (req, res) => {
+  idValidation,
+  validate,
+  asyncWrapper(async (req, res) => {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
     if (!req.file) return res.status(400).json({ message: "No image uploaded" });
     product.images.push(req.file.filename);
     await product.save();
+    invalidate("products:");
     res.json(product);
-  }
+  })
 );
 
 // Replace a specific image in images array
@@ -72,23 +78,20 @@ router.put(
   verfiyToken,
   isAdmin,
   upload.single("image"),
-  async (req, res) => {
+  idValidation,
+  validate,
+  asyncWrapper(async (req, res) => {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
     const idx = product.images.indexOf(req.params.imageName);
     if (idx === -1) return res.status(404).json({ message: "Image not found" });
-    // Remove old image from disk
-    const fs = require("fs");
-    const path = require("path");
-    try {
-      fs.unlinkSync(path.join("uploads", req.params.imageName));
-    } catch {}
-    // Replace with new image
     if (!req.file) return res.status(400).json({ message: "No image uploaded" });
+    deleteImage(req.params.imageName);
     product.images[idx] = req.file.filename;
     await product.save();
+    invalidate("products:");
     res.json(product);
-  }
+  })
 );
 
 // Delete a specific image from images array
@@ -96,21 +99,19 @@ router.delete(
   "/:id/images/:imageName",
   verfiyToken,
   isAdmin,
-  async (req, res) => {
+  idValidation,
+  validate,
+  asyncWrapper(async (req, res) => {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
     const idx = product.images.indexOf(req.params.imageName);
     if (idx === -1) return res.status(404).json({ message: "Image not found" });
-    // Remove from disk
-    const fs = require("fs");
-    const path = require("path");
-    try {
-      fs.unlinkSync(path.join("uploads", req.params.imageName));
-    } catch {}
+    deleteImage(req.params.imageName);
     product.images.splice(idx, 1);
     await product.save();
+    invalidate("products:");
     res.json(product);
-  }
+  })
 );
 
 module.exports = router;

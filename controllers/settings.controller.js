@@ -4,8 +4,8 @@ const asyncWrapper = require("../middleware/asyncwrapper");
 // Get Settings by Type
 const getSettings = asyncWrapper(async (req, res) => {
   const { type } = req.params;
-  const settings = await Settings.findOne({ type });
-  
+  const settings = await Settings.findOne({ type }, { __v: 0 }).lean();
+
   if (!settings) {
     // Return default settings if not found
     const defaults = getDefaultSettings(type);

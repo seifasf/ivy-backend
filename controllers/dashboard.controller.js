@@ -5,49 +5,41 @@ const asyncWrapper = require("../middleware/asyncwrapper");
 
 // Get Dashboard Statistics
 const getDashboardStats = asyncWrapper(async (req, res) => {
-  // Total Orders
-  const totalOrders = await Checkout.countDocuments();
-  
-  // Pending Orders
-  const pendingOrders = await Checkout.countDocuments({ status: "pending" });
-  
-  // Total Revenue (sum of all orders)
-  const revenueResult = await Checkout.aggregate([
-    { $group: { _id: null, total: { $sum: "$total" } } }
+  const [
+    totalOrders,
+    pendingOrders,
+    revenueResult,
+    totalProducts,
+    activePromoCodes,
+    customersResult
+  ] = await Promise.all([
+    Checkout.countDocuments(),
+    Checkout.countDocuments({ status: "pending" }),
+    Checkout.aggregate([{ $group: { _id: null, total: { $sum: "$total" } } }]),
+    Product.countDocuments(),
+    PromoCode.countDocuments({ active: true, expiryDate: { $gte: new Date() } }),
+    Checkout.aggregate([{ $group: { _id: "$userInfo.email" } }, { $count: "count" }])
   ]);
-  const totalRevenue = revenueResult.length > 0 ? revenueResult[0].total : 0;
-  
-  // Total Products
-  const totalProducts = await Product.countDocuments();
-  
-  // Active Promo Codes (not expired and still active)
-  const activePromoCodes = await PromoCode.countDocuments({
-    active: true,
-    expiryDate: { $gte: new Date() }
-  });
-  
-  // Total Customers (unique emails from orders)
-  const uniqueCustomers = await Checkout.distinct("userInfo.email");
-  const totalCustomers = uniqueCustomers.length;
-  
+
   res.json({
     totalOrders,
     pendingOrders,
-    totalRevenue,
+    totalRevenue: revenueResult[0]?.total || 0,
     totalProducts,
     activePromoCodes,
-    totalCustomers
+    totalCustomers: customersResult[0]?.count || 0
   });
 });
 
 // Get Recent Orders
 const getRecentOrders = asyncWrapper(async (req, res) => {
-  const limit = parseInt(req.query.limit) || 5;
-  
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 5, 1), 50);
+
   const orders = await Checkout.find()
     .sort({ createdAt: -1 })
     .limit(limit)
-    .select('_id userInfo.name items total status createdAt');
+    .select('_id userInfo.name items total status createdAt')
+    .lean();
   
   const recentOrders = orders.map(order => ({
     id: order._id,

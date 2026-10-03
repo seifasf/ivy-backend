@@ -1,9 +1,19 @@
+require("dotenv").config();
 const express = require('express');
 const helmet = require('helmet');
-const app = express();
-app.use(express.json());
-require("dotenv").config();
 const cors = require('cors');
+const compression = require('compression');
+const mongoose = require('mongoose');
+const { serveImage, LEGACY_DIR } = require('./utils/images');
+const { apiLimiter } = require('./middleware/rateLimits');
+const { notFound, errorHandler } = require('./middleware/errorHandler');
+
+const app = express();
+
+// Render (and most hosts) sit behind one proxy; needed for correct client IPs in rate limiting
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
 // FRONTEND_URL may hold several origins separated by commas
 const frontendOrigins = (process.env.FRONTEND_URL || '')
     .split(',')
@@ -18,103 +28,92 @@ app.use(cors({
       'http://localhost:5175',
       ...frontendOrigins
     ],
-    credentials: true
+    credentials: true,
+    maxAge: 86400
   }));
 
-app.use(helmet());
-const mongoose = require('mongoose');
-const url = process.env.MONGO_URL;
+// Images are loaded by the storefront from another origin
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(compression());
+app.use(express.json({ limit: '1mb' }));
 
-// MongoDB connection with better error handling and timeout
+const url = process.env.MONGO_URL;
 if (!url) {
     console.error("❌ MONGO_URL is not set in .env file!");
     process.exit(1);
 }
 
-console.log("🔄 Attempting to connect to MongoDB...");
-mongoose.connect(url, {
-    serverSelectionTimeoutMS: 30000, // 30 seconds
-    socketTimeoutMS: 45000, // 45 seconds
-    connectTimeoutMS: 30000, // 30 seconds
-    retryWrites: true,
-    w: 'majority'
-}).then(()=>{
-    console.log("✅ Connected to MongoDB - IVY Database");
-    console.log("📊 Database:", url.split('/').pop().split('?')[0]);
-}).catch((err) => {
-    console.error("❌ MongoDB connection error:", err.message);
-    console.error("🔍 Connection string:", url.replace(/:[^:@]+@/, ':****@')); // Hide password
-    console.error("💡 Please check:");
-    console.error("   1. MongoDB Atlas Network Access - Add your IP or 0.0.0.0/0");
-    console.error("   2. Database user password is correct");
-    console.error("   3. Connection string in .env file");
-    console.error("   4. Internet connection is working");
-});
+const connectWithRetry = async (attempt = 1) => {
+    try {
+        console.log(`🔄 Connecting to MongoDB (attempt ${attempt})...`);
+        await mongoose.connect(url, {
+            serverSelectionTimeoutMS: 15000,
+            socketTimeoutMS: 45000,
+            maxPoolSize: 10,
+        });
+        console.log("✅ Connected to MongoDB - IVY Database");
+        console.log("📊 Database:", mongoose.connection.name);
+    } catch (err) {
+        const delay = Math.min(30000, 2000 * attempt);
+        console.error(`❌ MongoDB connection error: ${err.message}. Retrying in ${delay / 1000}s`);
+        setTimeout(() => connectWithRetry(attempt + 1), delay);
+    }
+};
+connectWithRetry();
 
-// Import routes
-const productRoutes = require('./routes/product.route');
-app.use('/api/products', productRoutes);
+const dbStatus = () => (mongoose.connection.readyState === 1 ? 'connected' : 'disconnected');
 
-const galleryRoutes = require('./routes/gallery.route');
-app.use('/api/gallery', galleryRoutes);
-
-const contactRoutes = require('./routes/contact.route');
-app.use('/api/contact', contactRoutes);
-
-const businessRoutes = require('./routes/business.route');
-app.use('/api/business', businessRoutes);
-
-const customizeRoutes = require('./routes/customize.route');
-app.use('/api/customize', customizeRoutes);
-
-const userRoutes = require('./routes/user.route');
-app.use('/api/users', userRoutes);
-
-const adminRoutes = require('./routes/admin.route');
-app.use('/api/admin', adminRoutes);
-
-const checkoutRoutes = require('./routes/checkout.route');
-app.use('/api/checkout', checkoutRoutes);
-
-const shippingRoutes = require('./routes/shipping.route');
-app.use('/api/shipping', shippingRoutes);
-
-const promoCodeRoutes = require('./routes/promocode.route');
-app.use('/api/promocodes', promoCodeRoutes);
-
-const dashboardRoutes = require('./routes/dashboard.route');
-app.use('/api/dashboard', dashboardRoutes);
-
-const governorateShippingRoutes = require('./routes/governorate-shipping.route');
-app.use('/api/governorate-shipping', governorateShippingRoutes);
-
-const settingsRoutes = require('./routes/settings.route');
-app.use('/api/settings', settingsRoutes);
-
-// Health check endpoint (no MongoDB required)
 app.get('/', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        message: 'Welcome to IVY E-commerce Backend API',
-        mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-        timestamp: new Date().toISOString()
-    });  
-});
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-    res.json({ 
+    res.json({
         status: 'ok',
-        server: 'running',
-        mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        message: 'Welcome to IVY E-commerce Backend API',
+        mongodb: dbStatus(),
         timestamp: new Date().toISOString()
     });
 });
 
-// Serve uploaded images
-app.use('/uploads', express.static('uploads')); 
+app.get('/api/health', (req, res) => {
+    const healthy = dbStatus() === 'connected';
+    res.status(healthy ? 200 : 503).json({
+        status: healthy ? 'ok' : 'degraded',
+        server: 'running',
+        mongodb: dbStatus(),
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Images live in MongoDB (GridFS); the local folder only holds files uploaded before that change
+app.get('/uploads/:filename', serveImage);
+app.use('/uploads', express.static(LEGACY_DIR, { maxAge: '365d', immutable: true }));
+
+app.use('/api', apiLimiter);
+
+app.use('/api/products', require('./routes/product.route'));
+app.use('/api/gallery', require('./routes/gallery.route'));
+app.use('/api/contact', require('./routes/contact.route'));
+app.use('/api/business', require('./routes/business.route'));
+app.use('/api/customize', require('./routes/customize.route'));
+app.use('/api/users', require('./routes/user.route'));
+app.use('/api/admin', require('./routes/admin.route'));
+app.use('/api/checkout', require('./routes/checkout.route'));
+app.use('/api/shipping', require('./routes/shipping.route'));
+app.use('/api/promocodes', require('./routes/promocode.route'));
+app.use('/api/dashboard', require('./routes/dashboard.route'));
+app.use('/api/governorate-shipping', require('./routes/governorate-shipping.route'));
+app.use('/api/settings', require('./routes/settings.route'));
+
+app.use(notFound);
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`IVY Backend Server is running on port ${PORT}`);
 });
+
+const shutdown = (signal) => {
+    console.log(`${signal} received, shutting down`);
+    server.close(() => mongoose.connection.close(false).finally(() => process.exit(0)));
+    setTimeout(() => process.exit(0), 10000).unref();
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

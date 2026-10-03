@@ -2,24 +2,8 @@ const User = require("../model/admin.model");
 const asyncWrapper = require("../middleware/asyncwrapper");
 const bcrypt = require("bcrypt");
 const genrateToken = require("../utils/genrateToken");
-const nodemailer = require("nodemailer");
+const { sendEmail } = require("../utils/mailer");
 
-// Helper: send email
-const sendEmail = async (to, subject, text) => {
-  const transporter = nodemailer.createTransporter({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-  await transporter.sendMail({
-    from: process.env.EMAIL_USER,
-    to,
-    subject,
-    text,
-  });
-};
 
 // Sign Up
 const signup = asyncWrapper(async (req, res) => {

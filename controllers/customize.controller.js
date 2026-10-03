@@ -1,7 +1,6 @@
 const Customize = require("../model/customize.model");
 const asyncWrapper = require("../middleware/asyncwrapper");
-const fs = require("fs");
-const path = require("path");
+const { deleteImage } = require("../utils/images");
 
 // Create Customize
 const createCustomize = asyncWrapper(async (req, res) => {
@@ -59,7 +58,7 @@ const updateCustomize = asyncWrapper(async (req, res) => {
   customize.image.forEach(img => {
     if (!oldImagesArr.includes(img)) {
       try {
-        fs.unlinkSync(path.join('uploads', img));
+        deleteImage(img);
       } catch (e) {}
     }
   });
@@ -85,7 +84,7 @@ const deleteCustomize = asyncWrapper(async (req, res) => {
   // Remove images from disk
   try {
     customize.image.forEach(img => {
-      fs.unlinkSync(path.join('uploads', img));
+      deleteImage(img);
     });
   } catch (e) {}
 
