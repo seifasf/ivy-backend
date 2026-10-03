@@ -4,13 +4,19 @@ const app = express();
 app.use(express.json());
 require("dotenv").config();
 const cors = require('cors');
+// FRONTEND_URL may hold several origins separated by commas
+const frontendOrigins = (process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+
 app.use(cors({
     origin: [
       'http://localhost:3000',
       'http://localhost:5173',
       'http://localhost:5174',
       'http://localhost:5175',
-      'https://ivy-eg.vercel.app'
+      ...frontendOrigins
     ],
     credentials: true
   }));
