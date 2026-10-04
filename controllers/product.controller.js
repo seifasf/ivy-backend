@@ -39,6 +39,33 @@ const cleanColors = (value) => {
     .filter((c) => c.name && !seen.has(c.name.toLowerCase()) && seen.add(c.name.toLowerCase()));
 };
 
+// Per-size units arrive as JSON: [{"size":"M","stock":12}]
+const cleanSizeStock = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  const list = typeof value === "string" ? JSON.parse(value) : value;
+  const merged = new Map();
+  for (const line of list) {
+    const size = String(line.size).trim().toUpperCase();
+    if (!SIZE_PATTERN.test(size)) continue;
+    merged.set(size, (merged.get(size) || 0) + Math.max(0, Math.floor(Number(line.stock) || 0)));
+  }
+  return [...merged].map(([size, stock]) => ({ size, stock }));
+};
+
+// When units are tracked per size, the sizes on sale are exactly those sizes
+// and their units must add up to the total stock.
+const sizeStockProblem = (sizeStock, stock) => {
+  if (!sizeStock.length) return null;
+  const allocated = sizeStock.reduce((sum, line) => sum + line.stock, 0);
+  if (allocated !== Number(stock)) {
+    return `Size quantities add up to ${allocated} but total stock is ${Number(stock)}. They must match.`;
+  }
+  return null;
+};
+
+// Shoppers never see what a product costs the store
+const PUBLIC_FIELDS = { __v: false, costPrice: false };
+
 // A missing or invalid sale price means "no discount"
 const resolveDiscount = (price, discountPrice) => {
   const sale = Number(discountPrice);
@@ -49,12 +76,17 @@ const resolveDiscount = (price, discountPrice) => {
 
 // Create Product
 const createProduct = asyncWrapper(async (req, res) => {
-  const { title, description, price, discountPrice, inStock, category, stock, sizes, colors } = req.body;
+  const { title, description, price, discountPrice, costPrice, inStock, category, stock, sizes, sizeStock, colors } = req.body;
 
   const mainImage = req.files?.mainImage?.[0]?.filename;
   if (!mainImage) {
     return res.status(400).json({ message: "Main image is required" });
   }
+
+  const sizeStockList = cleanSizeStock(sizeStock) || [];
+  const problem = sizeStockProblem(sizeStockList, stock);
+  if (problem) return res.status(400).json({ message: problem });
+
   const images = (req.files?.images || []).map((file) => file.filename);
 
   const product = await Product.create({
@@ -67,7 +99,9 @@ const createProduct = asyncWrapper(async (req, res) => {
     mainImage,
     images,
     stock,
-    sizes: cleanSizes(sizes) || [],
+    costPrice: Number(costPrice) || 0,
+    sizes: sizeStockList.length ? sizeStockList.map((line) => line.size) : cleanSizes(sizes) || [],
+    sizeStock: sizeStockList,
     colors: cleanColors(colors) || [],
   });
 
@@ -78,15 +112,22 @@ const createProduct = asyncWrapper(async (req, res) => {
 // Get All Products
 const getAllProducts = asyncWrapper(async (req, res) => {
   const products = await remember("products:all", PRODUCTS_TTL_MS, () =>
-    Product.find({}, { __v: false }).sort({ createdAt: -1 }).lean()
+    Product.find({}, PUBLIC_FIELDS).sort({ createdAt: -1 }).lean()
   );
   res.set("Cache-Control", "public, no-cache");
   res.json(products);
 });
 
+// Get All Products with cost data (admin)
+const getAllProductsAdmin = asyncWrapper(async (req, res) => {
+  const products = await Product.find({}, { __v: false }).sort({ createdAt: -1 }).lean();
+  res.set("Cache-Control", "private, no-store");
+  res.json(products);
+});
+
 // Get Product By ID
 const getProductById = asyncWrapper(async (req, res) => {
-  const product = await Product.findById(req.params.id, { __v: false }).lean();
+  const product = await Product.findById(req.params.id, PUBLIC_FIELDS).lean();
   if (!product) return res.status(404).json({ message: "Product not found" });
   res.set("Cache-Control", "public, no-cache");
   res.json(product);
@@ -97,7 +138,7 @@ const updateProduct = asyncWrapper(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (!product) return res.status(404).json({ message: "Product not found" });
 
-  const { title, description, price, discountPrice, inStock, category, stock, sizes, colors, oldImages } = req.body;
+  const { title, description, price, discountPrice, costPrice, inStock, category, stock, sizes, sizeStock, colors, oldImages } = req.body;
   const removedImages = [];
 
   const newMain = req.files?.mainImage?.[0]?.filename;
@@ -125,11 +166,23 @@ const updateProduct = asyncWrapper(async (req, res) => {
     product.discountPrice = resolveDiscount(product.price, discountPrice ?? product.discountPrice);
   }
   if (inStock !== undefined) product.inStock = inStock;
+  if (costPrice !== undefined) product.costPrice = Number(costPrice) || 0;
   if (stock !== undefined) product.stock = stock;
   const sizeList = cleanSizes(sizes);
   if (sizeList) product.sizes = sizeList;
+  const sizeStockList = cleanSizeStock(sizeStock);
+  if (sizeStockList) {
+    product.sizeStock = sizeStockList;
+    if (sizeStockList.length) product.sizes = sizeStockList.map((line) => line.size);
+  } else if (sizeList && product.sizeStock.length) {
+    // Sizes changed without new quantities: keep units only for sizes still on sale
+    product.sizeStock = product.sizeStock.filter((line) => sizeList.includes(line.size));
+  }
   const colorList = cleanColors(colors);
   if (colorList) product.colors = colorList;
+
+  const problem = sizeStockProblem(product.sizeStock, product.stock);
+  if (problem) return res.status(400).json({ message: problem });
 
   await product.save();
   // Only remove replaced images once the product points at the new ones
@@ -153,6 +206,7 @@ const deleteProduct = asyncWrapper(async (req, res) => {
 module.exports = {
   createProduct,
   getAllProducts,
+  getAllProductsAdmin,
   getProductById,
   updateProduct,
   deleteProduct

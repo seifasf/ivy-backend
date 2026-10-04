@@ -27,6 +27,23 @@ const isColorList = (value) => {
 const optionalColors = () =>
   body('colors').optional().custom(isColorList).withMessage('Colors must be a list of names with optional #hex values');
 
+// Units per size arrive as a JSON string: [{"size":"M","stock":12}]
+const isSizeStockList = (value) => {
+  try {
+    const list = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(list) && list.length <= 30 && list.every((line) =>
+      line && typeof line.size === 'string' && line.size.trim() && line.size.length <= 20 &&
+      Number.isInteger(Number(line.stock)) && Number(line.stock) >= 0);
+  } catch {
+    return false;
+  }
+};
+const optionalSizeStock = () =>
+  body('sizeStock').optional().custom(isSizeStockList).withMessage('Each size needs a whole number of units (0 or more)');
+
+const optionalCostPrice = () =>
+  body('costPrice').optional({ values: 'falsy' }).isFloat({ min: 0 }).withMessage('Cost price must be a positive number');
+
 const optionalList = (field, label) =>
   body(field).optional().custom(isStringList).withMessage(`${label} must be a list of text values`);
 

@@ -186,7 +186,7 @@ const getUserOrders = asyncWrapper(async (req, res) => {
   const userId = req.decoded.id;
   const Checkout = require("../model/checkout.model");
   
-  const orders = await Checkout.find({ userId }, { __v: 0 })
+  const orders = await Checkout.find({ userId }, { __v: 0, "items.costPrice": 0, stockTracked: 0, stockDeducted: 0 })
     .sort({ createdAt: -1 })
     .populate('items.productId', 'title mainImage')
     .lean();

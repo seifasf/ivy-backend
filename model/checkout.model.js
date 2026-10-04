@@ -24,9 +24,14 @@ const checkoutSchema = new mongoose.Schema({
       mainImage: { type: String, required: true },
       quantity: { type: Number, required: true },
       size: { type: String },
-      color: { type: String }
+      color: { type: String },
+      costPrice: { type: Number, default: 0 }
     }
   ],
+  // stockTracked: placed after stock tracking existed (unset on older orders);
+  // stockDeducted: its units are currently taken out of product stock
+  stockTracked: { type: Boolean },
+  stockDeducted: { type: Boolean, default: false },
   paymentMethod: { type: String, default: "cash-on-delivery" },
   total: { type: Number, required: true },
   shippingFee: { type: Number, default: 0 },

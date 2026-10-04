@@ -10,5 +10,8 @@ router.get("/stats", verfiyToken, isAdmin, dashboardController.getDashboardStats
 // Get Recent Orders (protected - admin only)
 router.get("/recent-orders", verfiyToken, isAdmin, dashboardController.getRecentOrders);
 
+// Sales, profit and inventory analytics (protected - admin only)
+router.get("/analytics", verfiyToken, isAdmin, dashboardController.getAnalytics);
+
 module.exports = router;
 

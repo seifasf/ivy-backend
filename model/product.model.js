@@ -43,6 +43,23 @@ const productSchema = new mongoose.Schema({
     required: false, 
     default: []
   },
+  // Units per size; when present the entries add up to `stock`
+  sizeStock: {
+    type: [
+      {
+        _id: false,
+        size: { type: String, required: true },
+        stock: { type: Number, required: true, min: 0 }
+      }
+    ],
+    default: []
+  },
+  // What one unit costs the store; admin only, never sent to shoppers
+  costPrice: {
+    type: Number,
+    min: 0,
+    default: 0
+  },
   colors: {
     type: [
       {

@@ -32,6 +32,9 @@ router.post(
 // Get All Products
 router.get("/", productController.getAllProducts);
 
+// Get All Products including cost prices (protected)
+router.get("/admin/all", verfiyToken, isAdmin, productController.getAllProductsAdmin);
+
 // Get Product By ID
 router.get("/:id", idValidation, validate, productController.getProductById);
 
