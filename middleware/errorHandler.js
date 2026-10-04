@@ -11,7 +11,10 @@ const errorHandler = (err, req, res, next) => {
 
   if (err instanceof multer.MulterError) {
     status = 400;
-    message = err.code === "LIMIT_FILE_SIZE" ? "Each image must be 5MB or smaller" : err.message;
+    message =
+      err.code === "LIMIT_FILE_SIZE" ? "Each image must be 10MB or smaller"
+      : err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE" ? "Too many images (1 main + up to 10 extra)"
+      : err.message;
   } else if (err.name === "CastError") {
     status = 400;
     message = `Invalid ${err.path}`;

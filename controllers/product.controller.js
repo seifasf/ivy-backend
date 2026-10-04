@@ -5,40 +5,59 @@ const { remember, invalidate } = require("../utils/memoryCache");
 
 const PRODUCTS_TTL_MS = 60 * 1000;
 
+const MAX_EXTRA_IMAGES = 10;
+
+// Form fields arrive as a JSON array string, repeated fields, or a single value
+const toList = (value) => {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) return value.map(String);
+  const text = String(value).trim();
+  if (text.startsWith("[")) {
+    try {
+      return JSON.parse(text).map(String);
+    } catch {
+      return [];
+    }
+  }
+  return text ? [text] : [];
+};
+
+const cleanSizes = (value) => {
+  const list = toList(value);
+  return list && [...new Set(list.map((s) => s.trim().toUpperCase()).filter(Boolean))];
+};
+
+// A missing or invalid sale price means "no discount"
+const resolveDiscount = (price, discountPrice) => {
+  const sale = Number(discountPrice);
+  return discountPrice !== undefined && discountPrice !== "" && Number.isFinite(sale) && sale >= 0
+    ? sale
+    : Number(price);
+};
+
 // Create Product
 const createProduct = asyncWrapper(async (req, res) => {
-  const {
-    title,
-    description,
-    price,
-    discountPrice,
-    inStock,
-    category,
-    stock,
-    sizes 
-  } = req.body;
+  const { title, description, price, discountPrice, inStock, category, stock, sizes } = req.body;
 
-  if (!req.files || !req.files.mainImage || req.files.mainImage.length === 0) {
+  const mainImage = req.files?.mainImage?.[0]?.filename;
+  if (!mainImage) {
     return res.status(400).json({ message: "Main image is required" });
   }
+  const images = (req.files?.images || []).map((file) => file.filename);
 
-  const mainImage = req.files.mainImage[0].filename;
-  const images = req.files.images ? req.files.images.map(file => file.filename) : [];
-
-  const product = new Product({
-    title,
-    description,
+  const product = await Product.create({
+    title: title.trim(),
+    description: description.trim(),
     price,
-    discountPrice,
-    inStock,
-    category,
+    discountPrice: resolveDiscount(price, discountPrice),
+    inStock: inStock ?? true,
+    category: category.trim(),
     mainImage,
     images,
     stock,
-    sizes: Array.isArray(sizes) ? sizes : (sizes ? [sizes] : []) 
+    sizes: cleanSizes(sizes) || [],
   });
 
-  await product.save();
   invalidate("products:");
   res.status(201).json(product);
 });
@@ -65,70 +84,41 @@ const updateProduct = asyncWrapper(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (!product) return res.status(404).json({ message: "Product not found" });
 
-  const {
-    title,
-    description,
-    price,
-    discountPrice,
-    inStock,
-    category,
-    stock,
-    sizes,
-    oldImages
-  } = req.body;
+  const { title, description, price, discountPrice, inStock, category, stock, sizes, oldImages } = req.body;
+  const removedImages = [];
 
-  // Handle mainImage update
-  if (req.files && req.files.mainImage && req.files.mainImage.length > 0) {
-    // Remove old main image
-    deleteImage(product.mainImage);
-    product.mainImage = req.files.mainImage[0].filename;
+  const newMain = req.files?.mainImage?.[0]?.filename;
+  if (newMain) {
+    removedImages.push(product.mainImage);
+    product.mainImage = newMain;
   }
 
-  // Handle images array update (smart merge)
-  let newImages = [];
-  if (req.files && req.files.images && req.files.images.length > 0) {
-    newImages = req.files.images.map(file => file.filename);
+  // oldImages lists the existing extra images to keep; omitted means keep all
+  const keepList = toList(oldImages);
+  const kept = keepList ? product.images.filter((img) => keepList.includes(img)) : [...product.images];
+  removedImages.push(...product.images.filter((img) => !kept.includes(img)));
+
+  const added = (req.files?.images || []).map((file) => file.filename);
+  if (kept.length + added.length > MAX_EXTRA_IMAGES) {
+    return res.status(400).json({ message: `A product can have at most ${MAX_EXTRA_IMAGES} extra images` });
   }
+  product.images = [...kept, ...added];
 
-  // oldImages: array of filenames that should remain (from frontend)
-  let oldImagesArr = [];
-  if (oldImages) {
-    if (Array.isArray(oldImages)) {
-      oldImagesArr = oldImages;
-    } else if (typeof oldImages === "string") {
-      oldImagesArr = [oldImages];
-    }
-  } else {
-    oldImagesArr = product.images || [];
+  if (title !== undefined) product.title = title.trim();
+  if (description !== undefined) product.description = description.trim();
+  if (category !== undefined) product.category = category.trim();
+  if (price !== undefined) product.price = price;
+  if (discountPrice !== undefined || price !== undefined) {
+    product.discountPrice = resolveDiscount(product.price, discountPrice ?? product.discountPrice);
   }
-
-  // Remove deleted images from disk
-  product.images.forEach(img => {
-    if (!oldImagesArr.includes(img)) {
-      deleteImage(img);
-    }
-  });
-
-  // Final images = oldImagesArr (remaining) + newImages (added)
-  product.images = [...oldImagesArr, ...newImages];
-
-  product.title = title ?? product.title;
-  product.description = description ?? product.description;
-  product.price = price ?? product.price;
-  product.discountPrice = discountPrice ?? product.discountPrice;
-  product.inStock = inStock ?? product.inStock;
-  product.category = category ?? product.category;
-  product.stock = stock ?? product.stock;
-  // Handle sizes as array of strings
-  if (sizes) {
-    if (Array.isArray(sizes)) {
-      product.sizes = sizes;
-    } else if (typeof sizes === "string") {
-      product.sizes = [sizes];
-    }
-  }
+  if (inStock !== undefined) product.inStock = inStock;
+  if (stock !== undefined) product.stock = stock;
+  const sizeList = cleanSizes(sizes);
+  if (sizeList) product.sizes = sizeList;
 
   await product.save();
+  // Only remove replaced images once the product points at the new ones
+  removedImages.forEach((img) => deleteImage(img));
   invalidate("products:");
   res.json(product);
 });
@@ -138,11 +128,9 @@ const deleteProduct = asyncWrapper(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (!product) return res.status(404).json({ message: "Product not found" });
 
-  // Remove images from disk
+  await product.deleteOne();
   deleteImage(product.mainImage);
   product.images.forEach(img => deleteImage(img));
-
-  await product.deleteOne();
   invalidate("products:");
   res.json({ message: "Product deleted" });
 });
