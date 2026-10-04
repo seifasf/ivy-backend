@@ -43,6 +43,16 @@ const productSchema = new mongoose.Schema({
     required: false, 
     default: []
   },
+  colors: {
+    type: [
+      {
+        _id: false,
+        name: { type: String, required: true, trim: true },
+        hex: { type: String, default: "" }
+      }
+    ],
+    default: []
+  },
 }, { timestamps: true });
 
 productSchema.index({ createdAt: -1 });

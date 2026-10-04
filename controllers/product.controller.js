@@ -22,9 +22,21 @@ const toList = (value) => {
   return text ? [text] : [];
 };
 
+// Sizes look like "M", "XXL", "42" or "ONE SIZE"; anything else is a stray encoded value
+const SIZE_PATTERN = /^[A-Z0-9][A-Z0-9 ./-]{0,19}$/;
+
 const cleanSizes = (value) => {
   const list = toList(value);
-  return list && [...new Set(list.map((s) => s.trim().toUpperCase()).filter(Boolean))];
+  return list && [...new Set(list.map((s) => s.trim().toUpperCase()).filter((s) => SIZE_PATTERN.test(s)))];
+};
+
+const cleanColors = (value) => {
+  if (value === undefined || value === null) return undefined;
+  const list = typeof value === "string" ? JSON.parse(value) : value;
+  const seen = new Set();
+  return list
+    .map((c) => ({ name: String(c.name).trim(), hex: (c.hex || "").toLowerCase() }))
+    .filter((c) => c.name && !seen.has(c.name.toLowerCase()) && seen.add(c.name.toLowerCase()));
 };
 
 // A missing or invalid sale price means "no discount"
@@ -37,7 +49,7 @@ const resolveDiscount = (price, discountPrice) => {
 
 // Create Product
 const createProduct = asyncWrapper(async (req, res) => {
-  const { title, description, price, discountPrice, inStock, category, stock, sizes } = req.body;
+  const { title, description, price, discountPrice, inStock, category, stock, sizes, colors } = req.body;
 
   const mainImage = req.files?.mainImage?.[0]?.filename;
   if (!mainImage) {
@@ -56,6 +68,7 @@ const createProduct = asyncWrapper(async (req, res) => {
     images,
     stock,
     sizes: cleanSizes(sizes) || [],
+    colors: cleanColors(colors) || [],
   });
 
   invalidate("products:");
@@ -84,7 +97,7 @@ const updateProduct = asyncWrapper(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (!product) return res.status(404).json({ message: "Product not found" });
 
-  const { title, description, price, discountPrice, inStock, category, stock, sizes, oldImages } = req.body;
+  const { title, description, price, discountPrice, inStock, category, stock, sizes, colors, oldImages } = req.body;
   const removedImages = [];
 
   const newMain = req.files?.mainImage?.[0]?.filename;
@@ -115,6 +128,8 @@ const updateProduct = asyncWrapper(async (req, res) => {
   if (stock !== undefined) product.stock = stock;
   const sizeList = cleanSizes(sizes);
   if (sizeList) product.sizes = sizeList;
+  const colorList = cleanColors(colors);
+  if (colorList) product.colors = colorList;
 
   await product.save();
   // Only remove replaced images once the product points at the new ones

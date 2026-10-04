@@ -13,6 +13,20 @@ const isStringList = (value) => {
   }
 };
 
+// Colors arrive as a JSON string: [{"name":"Black","hex":"#000000"}]
+const isColorList = (value) => {
+  try {
+    const list = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(list) && list.length <= 20 && list.every((c) =>
+      c && typeof c.name === 'string' && c.name.trim() && c.name.length <= 40 &&
+      (c.hex === undefined || c.hex === '' || /^#[0-9a-f]{6}$/i.test(c.hex)));
+  } catch {
+    return false;
+  }
+};
+const optionalColors = () =>
+  body('colors').optional().custom(isColorList).withMessage('Colors must be a list of names with optional #hex values');
+
 const optionalList = (field, label) =>
   body(field).optional().custom(isStringList).withMessage(`${label} must be a list of text values`);
 
@@ -28,6 +42,7 @@ exports.createProductValidation = [
     .isLength({ max: 60 }).withMessage('Category must be 60 characters or less'),
   body('stock').isInt({ min: 0 }).withMessage('Stock must be a whole number of 0 or more'),
   optionalList('sizes', 'Sizes'),
+  optionalColors(),
 ];
 
 exports.updateProductValidation = [
@@ -43,6 +58,7 @@ exports.updateProductValidation = [
   body('stock').optional().isInt({ min: 0 }).withMessage('Stock must be a whole number of 0 or more'),
   optionalList('sizes', 'Sizes'),
   optionalList('oldImages', 'Kept images'),
+  optionalColors(),
 ];
 
 exports.idValidation = [

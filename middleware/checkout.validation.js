@@ -13,6 +13,7 @@ exports.checkoutValidation = [
   body('items.*.productId').isMongoId().withMessage('Invalid product ID'),
   body('items.*.quantity').isInt({ min: 1, max: 100 }).withMessage('Quantity must be between 1 and 100'),
   body('items.*.size').optional({ nullable: true }).isString().trim().isLength({ max: 20 }),
+  body('items.*.color').optional({ nullable: true }).isString().trim().isLength({ max: 40 }),
   body('promoCode').optional({ nullable: true }).isString().trim().isLength({ max: 40 }),
   body('paymentMethod').optional().isString().trim().isLength({ max: 40 }),
 ];

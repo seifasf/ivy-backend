@@ -26,7 +26,7 @@ const createCheckout = asyncWrapper(async (req, res) => {
   const productIds = [...new Set(items.map((item) => String(item.productId)))];
   const products = await Product.find(
     { _id: { $in: productIds } },
-    { title: 1, price: 1, discountPrice: 1, inStock: 1, mainImage: 1, sizes: 1 }
+    { title: 1, price: 1, discountPrice: 1, inStock: 1, mainImage: 1, sizes: 1, colors: 1 }
   ).lean();
   const productsById = new Map(products.map((p) => [String(p._id), p]));
 
@@ -39,13 +39,23 @@ const createCheckout = asyncWrapper(async (req, res) => {
     if (!product.inStock) {
       return res.status(400).json({ message: `"${product.title}" is out of stock` });
     }
+    const size = (item.size || "").trim();
+    if (product.sizes?.length && !product.sizes.includes(size)) {
+      return res.status(400).json({ message: `Please choose a valid size for "${product.title}"` });
+    }
+    const colorNames = (product.colors || []).map((c) => c.name);
+    const color = (item.color || "").trim();
+    if (colorNames.length && !colorNames.includes(color)) {
+      return res.status(400).json({ message: `Please choose a valid color for "${product.title}"` });
+    }
     orderItems.push({
       productId: product._id,
       title: product.title,
       price: effectivePrice(product),
       mainImage: product.mainImage,
       quantity: item.quantity,
-      size: item.size || "",
+      size,
+      color,
     });
   }
 

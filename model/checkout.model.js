@@ -23,7 +23,8 @@ const checkoutSchema = new mongoose.Schema({
       price: { type: Number, required: true },
       mainImage: { type: String, required: true },
       quantity: { type: Number, required: true },
-      size: { type: String }
+      size: { type: String },
+      color: { type: String }
     }
   ],
   paymentMethod: { type: String, default: "cash-on-delivery" },
